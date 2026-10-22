@@ -70,7 +70,75 @@ done = nightly[nightly.get("complete", pd.Series(dtype=int)) == 1] if len(nightl
 st.title("🌙 夜株の盤")
 st.caption(f"更新: {status.get('generated_at', '—')}(読み込みは10分おき)")
 
-t1, t2, t3, t4, t5 = st.tabs(["概要", "夜ごと", "今夜の候補", "ストップ高", "常駐"])
+t0, t1, t2, t3, t4, t5 = st.tabs(["締め", "概要", "夜ごと", "今夜の候補", "ストップ高", "常駐"])
+
+with t0:
+    # 毎晩 18:07 に Discord へ飛ぶ要約(evening_digest)の、細かい中身。晩を選べる
+    led = read_csv("ledger/ledger_v3.csv", dtype={"code": str})
+    nights = sorted(done.date.unique(), reverse=True) if len(done) else []
+    if not nights:
+        st.info("まだ締めた晩が無い")
+    else:
+        night = st.selectbox("締めた晩", nights, index=0)
+        x = done[done.date == night].set_index("variant")
+        L = led[led.date == night] if len(led) else led
+        lo = L[L.role == "long"] if len(L) else L
+        # 金利の日数(受渡日どうし・両端入れ・土日込み)は台帳の金利から割り戻す
+        days = None
+        if len(lo):
+            q = lo[(lo.variant == "A") & lo["約定した値段"].notna()]
+            amt = (q.shares * q["約定した値段"]).sum()
+            days = round(q["金利"].sum() / (amt * 0.028 / 365)) if amt else None
+        st.subheader(f"{night} の晩" + (f"(金利{days}日)" if days else ""))
+        order = ["A", "shadow_2516", "shadow_100", "shadow_lb90", "shadow_lb250", "shadow_175", "B"]
+        rows = []
+        for v in [v for v in order if v in x.index] + [v for v in x.index if v not in order]:
+            r = x.loc[v]
+            rows.append({"版": v, "元金比%": r.net_pct_equity, "差し引き": r.net_pnl, "株": r.long_pnl, "ヘッジ": r.hedge_pnl,
+                         "コスト": r.costs, "本数": r.n_traded, "寄らず": r.n_stuck})
+        if {"A", "shadow_2516"} <= set(x.index):
+            rows.insert(2, {"版": "半々(1321+2516)", "元金比%": (x.loc["A"].net_pct_equity + x.loc["shadow_2516"].net_pct_equity) / 2,
+                            "差し引き": (x.loc["A"].net_pnl + x.loc["shadow_2516"].net_pnl) / 2,
+                            "株": x.loc["A"].long_pnl, "ヘッジ": (x.loc["A"].hedge_pnl + x.loc["shadow_2516"].hedge_pnl) / 2,
+                            "コスト": (x.loc["A"].costs + x.loc["shadow_2516"].costs) / 2, "本数": x.loc["A"].n_traded, "寄らず": x.loc["A"].n_stuck})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={"元金比%": st.column_config.NumberColumn(format="%+.3f"),
+                                    "差し引き": st.column_config.NumberColumn(format="%+,.0f")})
+        if len(L):
+            h = L[L.role == "hedge"][["variant", "code", "shares", "約定した値段", "exit_price", "pnl_yen", "貸株料"]].copy()
+            h["10口の倍数"] = h.shares % 10 == 0
+            st.markdown("**ヘッジ**")
+            st.dataframe(h.rename(columns={"variant": "版", "code": "銘柄", "shares": "口数", "約定した値段": "売り", "exit_price": "買い戻し", "pnl_yen": "損益"}),
+                         hide_index=True, width="stretch")
+            if (~h["10口の倍数"]).any():
+                st.warning("10口の倍数やない口数がある(10/20 の晩は単位を直す前の記帳)")
+            st.markdown("**本線の建玉**")
+            a_ = lo[lo.variant == "A"][["rank", "code", "shares", "想定の値段", "約定した値段", "exit_price", "pnl_yen", "status", "金利", "日々公表", "外し損ねた決算の夜"]]
+            st.dataframe(a_.sort_values("rank").rename(columns={"rank": "順位", "code": "コード", "shares": "株数", "約定した値段": "買い",
+                                                                "exit_price": "売り", "pnl_yen": "損益", "status": "状態"}),
+                         hide_index=True, width="stretch")
+        st.divider()
+        st.markdown("**15:35 の板読み(建てた日)**")
+        meta = read_csv("ledger/capture_meta.csv", dtype=str)
+        mm = meta[meta.date.str.startswith(str(night))] if len(meta) else meta
+        if len(mm):
+            for r in mm.itertuples():
+                sk = r.skipped_codes if isinstance(r.skipped_codes, str) else ""
+                why = " ".join(s.replace(":4002001", "(東証に無い)").replace(":4002006", "(登録の上限🚨)") for s in sk.split())
+                st.write(f"{r.date}: 上位{r.n_ranking}本・境目{r.boundary_pct}% → S高引け {r.n_limit_close}本 / 飛ばし {why or 'なし'}")
+        else:
+            st.caption("その日の板読みの控えが無い")
+        rec = read_csv("ledger/capture_reconcile.csv", dtype=str)
+        rr = rec[rec.date == str(night)] if len(rec) else rec
+        if len(rr):
+            r = rr.iloc[-1]
+            st.write(f"日足との突き合わせ: 板{r.n_capture}本 / 日足の上限引け{r.n_jq_limit_close}本 / 漏れ{r.n_missed}本 {'' if str(r.missed) == 'nan' else r.missed}")
+        arr = pd.DataFrame(status.get("jq_arrival", []))
+        if len(arr):
+            aa = arr[arr.date >= str(night)].head(2)
+            for _, r in aa.iterrows():
+                st.write(f"J-Quants {r['date']} の当日分: " + (f"{str(r['arrived_at'])[11:16]}({r.get('try')}回目)"
+                                                                if isinstance(r.get("arrived_at"), str) else "🚨 届かず"))
 
 with t1:
     a = done[done.variant == "A"] if len(done) else done
