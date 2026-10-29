@@ -125,7 +125,20 @@ with t0:
     if not nights:
         st.info("まだ締めた晩が無い")
     else:
-        night = st.selectbox("締めた晩", nights, index=0)
+        lv = read_csv("ledger/live_nightly.csv", dtype={"date": str})
+        if len(lv):
+            st.markdown("#### 💴 本番(実弾)")
+            st.dataframe(lv.sort_values("date", ascending=False), hide_index=True, width="stretch",
+                         column_config={"元金比%": st.column_config.NumberColumn(format="%+.3f"), "紙の半々%": st.column_config.NumberColumn(format="%+.3f"),
+                                        "取りこぼし%": st.column_config.NumberColumn(format="%+.3f"), "差し引き": st.column_config.NumberColumn(format="%+,.0f"),
+                                        "元金": st.column_config.NumberColumn(format="%,.0f")})
+            st.caption("取りこぼし = 本番 − 紙の半々(本線 A と 2516 の影の平均)。株の約定のずれ = 本番の約定値と、紙の値段(引け・翌朝の寄り)の差")
+        pb = read_csv("ledger/limitup_probe.csv", dtype={"code": str})
+        if len(pb):
+            st.markdown("#### 🧪 S高の試し")
+            st.dataframe(pb.sort_values("date", ascending=False), hide_index=True, width="stretch")
+        st.divider()
+        night = st.selectbox("締めた晩(紙)", nights, index=0)
         x = done[done.date == night].set_index("variant")
         L = led[led.date == night] if len(led) else led
         lo = L[L.role == "long"] if len(L) else L
