@@ -160,6 +160,21 @@ with tY:
     else:
         st.info("月ごとの収支の表(ledger/backtest_monthly.csv)がまだ読めん")
 
+    # 週ごとの流れ(scripts/phase_watch.py → ledger/phase_weekly.csv): 同じ候補での4つの手の1本の稼ぎ%と、踏み上げの割合
+    pw = read_csv("ledger/phase_weekly.csv")
+    if len(pw):
+        st.subheader("週ごとの流れ(紙、同じ候補で4つの手)")
+        nwk = st.slider("見る週の数", 8, len(pw), min(26, len(pw)))
+        w = pw.tail(nwk).rename(columns={pw.columns[0]: "週", "A": "寄り売り", "B": "寄り買い", "C": "引け売り", "D": "2日目の売り"})
+        lw = w.melt(id_vars=["週"], value_vars=["寄り売り", "寄り買い", "引け売り", "2日目の売り"], var_name="手", value_name="1本の稼ぎ%")
+        st.altair_chart(alt.Chart(lw).mark_line(point=True).encode(x=alt.X("週:N", sort=None, title=None), y="1本の稼ぎ%:Q", color="手:N",
+                                                                   tooltip=["週", "手", alt.Tooltip("1本の稼ぎ%:Q", format="+.2f")]), use_container_width=True)
+        st.altair_chart(alt.Chart(w).mark_bar().encode(x=alt.X("週:N", sort=None, title=None), y=alt.Y("sq:Q", title="踏み上げの割合%"),
+                                                       tooltip=["週", alt.Tooltip("sq:Q", format=".1f"), alt.Tooltip("skip:Q", title="下限で売れん%", format=".1f")]),
+                        use_container_width=True)
+        st.dataframe(w[["週", "日数", "n", "勝ち手", "寄り売り", "寄り買い", "引け売り", "2日目の売り", "sq", "skip", "gap"]].iloc[::-1]
+                     .rename(columns={"n": "候補/日", "sq": "踏み上げ%", "skip": "売れん%", "gap": "窓%"}), hide_index=True, width="stretch")
+
 with t0:
     # 毎晩 18:07 に Discord へ飛ぶ要約(evening_digest)の、細かい中身。晩を選べる
     led = read_csv("ledger/ledger_v3.csv", dtype={"code": str})
