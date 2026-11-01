@@ -116,7 +116,42 @@ done = nightly[nightly.get("complete", pd.Series(dtype=int)) == 1] if len(nightl
 st.title("🌙 夜株の盤")
 st.caption(f"更新: {status.get('generated_at', '—')}(読み込みは10分おき)")
 
-t0, t1, t2, t3, t4, t5 = st.tabs(["締め", "概要", "夜ごと", "今夜の候補", "ストップ高", "常駐"])
+tY, t0, t1, t2, t3, t4, t5 = st.tabs(["寄り空売り", "締め", "概要", "夜ごと", "今夜の候補", "ストップ高", "常駐"])
+
+with tY:
+    # 本線の月ごとの収支(検定)= 非公開リポの ledger/backtest_monthly.csv。手法の説明は公開のこのリポに書かん(ledger/backtest_monthly_note.txt から読む)
+    import altair as alt
+    bm = read_csv("ledger/backtest_monthly.csv", dtype={"month": str})
+    st.subheader("本線 ― 月ごとの収支(検定)")
+    note = fetch("ledger/backtest_monthly_note.txt")
+    if note:
+        st.caption(note)
+    if len(bm):
+        lots = sorted(bm.lot.unique())
+        lot = st.radio("1本の量", lots, index=0, horizontal=True, format_func=lambda v: f"¥{v // 10000}万" + ("(始める量)" if v == lots[0] else "(上げた後)"))
+        x = bm[bm.lot == lot].sort_values("month").copy()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("19か月の合計", f"¥{x.pnl.sum():+,.0f}")
+        c2.metric("月平均", f"¥{x.pnl.mean():+,.0f}")
+        c3.metric("勝った月", f"{(x.pnl > 0).sum()} / {len(x)}")
+        c4, c5, c6 = st.columns(3)
+        c4.metric("一番よかった月", f"¥{x.pnl.max():+,.0f}")
+        c5.metric("一番悪かった月", f"¥{x.pnl.min():+,.0f}")
+        c6.metric("張った本数", f"{int(x.n_trades.sum())}本")
+        x["色"] = x.pnl.map(lambda v: "勝ち" if v >= 0 else "負け")
+        x["月"] = x.month.str[2:].str.replace("-", "/")
+        base = alt.Chart(x).encode(x=alt.X("月:N", sort=None, title=None))
+        bars = base.mark_bar().encode(y=alt.Y("pnl:Q", title="月の収支(円)"),
+                                      color=alt.Color("色:N", scale=alt.Scale(domain=["勝ち", "負け"], range=["#2e9e6e", "#d0563e"]), legend=None),
+                                      tooltip=[alt.Tooltip("month:N", title="月"), alt.Tooltip("pnl:Q", title="収支", format="+,"),
+                                               alt.Tooltip("n_trades:Q", title="本数"), alt.Tooltip("cum:Q", title="累計", format="+,")])
+        line = base.mark_line(color="#4a72c4", point=True).encode(y=alt.Y("cum:Q", title="累計(円)"))
+        st.altair_chart(alt.layer(bars, line).resolve_scale(y="independent"), use_container_width=True)
+        st.caption("棒=月の収支(左の目盛り)、線=累計(右の目盛り)。")
+        st.dataframe(x[["month", "pnl", "n_trades", "win_rate", "cum"]].rename(columns={"month": "月", "pnl": "収支", "n_trades": "本数", "win_rate": "1本の勝率", "cum": "累計"}),
+                     hide_index=True, width="stretch")
+    else:
+        st.info("月ごとの収支の表(ledger/backtest_monthly.csv)がまだ読めん")
 
 with t0:
     # 毎晩 18:07 に Discord へ飛ぶ要約(evening_digest)の、細かい中身。晩を選べる
