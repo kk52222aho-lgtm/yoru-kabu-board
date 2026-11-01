@@ -121,7 +121,9 @@ tY, t0, t1, t2, t3, t4, t5 = st.tabs(["寄り空売り", "締め", "概要", "�
 with tY:
     # 本線の月ごとの収支(検定)= 非公開リポの ledger/backtest_monthly.csv。手法の説明は公開のこのリポに書かん(ledger/backtest_monthly_note.txt から読む)
     import altair as alt
-    bm = read_csv("ledger/backtest_monthly.csv", dtype={"month": str})
+    bm = read_csv("ledger/backtest_monthly_long.csv", dtype={"month": str})       # 2022-03〜(AI前から)
+    if not len(bm):
+        bm = read_csv("ledger/backtest_monthly.csv", dtype={"month": str})
     st.subheader("本線 ― 月ごとの収支(検定)")
     note = fetch("ledger/backtest_monthly_note.txt")
     if note:
@@ -131,7 +133,7 @@ with tY:
         lot = st.radio("1本の量", lots, index=0, horizontal=True, format_func=lambda v: f"¥{v // 10000}万" + ("(始める量)" if v == lots[0] else "(上げた後)"))
         x = bm[bm.lot == lot].sort_values("month").copy()
         c1, c2, c3 = st.columns(3)
-        c1.metric("19か月の合計", f"¥{x.pnl.sum():+,.0f}")
+        c1.metric(f"{len(x)}か月の合計", f"¥{x.pnl.sum():+,.0f}")
         c2.metric("月平均", f"¥{x.pnl.mean():+,.0f}")
         c3.metric("勝った月", f"{(x.pnl > 0).sum()} / {len(x)}")
         c4, c5, c6 = st.columns(3)
@@ -140,14 +142,19 @@ with tY:
         c6.metric("張った本数", f"{int(x.n_trades.sum())}本")
         x["色"] = x.pnl.map(lambda v: "勝ち" if v >= 0 else "負け")
         x["月"] = x.month.str[2:].str.replace("-", "/")
+        yr = x.groupby(x.month.str[:4]).agg(年の収支=("pnl", "sum"), 本数=("n_trades", "sum"))
+        st.dataframe(yr.reset_index().rename(columns={"month": "年"}), hide_index=True, width="stretch")
         base = alt.Chart(x).encode(x=alt.X("月:N", sort=None, title=None))
         bars = base.mark_bar().encode(y=alt.Y("pnl:Q", title="月の収支(円)"),
                                       color=alt.Color("色:N", scale=alt.Scale(domain=["勝ち", "負け"], range=["#2e9e6e", "#d0563e"]), legend=None),
                                       tooltip=[alt.Tooltip("month:N", title="月"), alt.Tooltip("pnl:Q", title="収支", format="+,"),
                                                alt.Tooltip("n_trades:Q", title="本数"), alt.Tooltip("cum:Q", title="累計", format="+,")])
         line = base.mark_line(color="#4a72c4", point=True).encode(y=alt.Y("cum:Q", title="累計(円)"))
-        st.altair_chart(alt.layer(bars, line).resolve_scale(y="independent"), use_container_width=True)
-        st.caption("棒=月の収支(左の目盛り)、線=累計(右の目盛り)。")
+        ev = pd.DataFrame({"月": ["22/11", "25/02", "25/04"], "節目": ["ChatGPT", "Claude Code", "Codex CLI"]})
+        ev = ev[ev.月.isin(x.月)]
+        rules = alt.Chart(ev).mark_rule(strokeDash=[3, 4], color="gray").encode(x=alt.X("月:N", sort=list(x.月)), tooltip=["節目:N"])
+        st.altair_chart(alt.layer(bars, line, rules).resolve_scale(y="independent"), use_container_width=True)
+        st.caption("棒=月の収支(左の目盛り)、線=累計(右の目盛り)、点線=AIの節目(ChatGPT・Claude Code・Codex CLI)。")
         st.dataframe(x[["month", "pnl", "n_trades", "win_rate", "cum"]].rename(columns={"month": "月", "pnl": "収支", "n_trades": "本数", "win_rate": "1本の勝率", "cum": "累計"}),
                      hide_index=True, width="stretch")
     else:
